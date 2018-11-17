@@ -28,14 +28,17 @@ def main():
 
     subparsers = parser.add_subparsers(dest="subcommand")
 
-    update = subparsers.add_parser("update",
-                                   help="update local to reflect remote",
-                                   description="Updates local branch tree/chain to reflect a remote tree/chain")
+    update = subparsers.add_parser(
+        "update",
+        help="update local to reflect remote",
+        description="Updates local branch tree/chain structure to reflect a remote tree/chain structure"
+    )
+
     update.add_argument("branches",
                         metavar='branch-name',
-                        help='The name of a branch that is part of the tree/chain',
+                        help='The name of a branch that is part of the tree/chain (must have a remote branch)',
                         nargs='+',
-                        type=only_valid_branches)
+                        type=only_local_pushed_branches)
 
     args = parser.parse_args()
     subcommand = args.subcommand
@@ -43,7 +46,7 @@ def main():
         update_local_branches(args.branches, args.conflict_resolution_timeout)
 
 
-def only_valid_branches(branch_name: str) -> Optional[str]:
+def only_local_pushed_branches(branch_name: str) -> Optional[str]:
     if not git_branch_exists(branch_name, remote=False):
         raise argparse.ArgumentTypeError("'%s' is not a name of an existing local branch" % branch_name)
     if not git_branch_exists(branch_name, remote=True):
