@@ -4,11 +4,14 @@
 import time
 import unittest
 from dataclasses import dataclass
+from os import path
 from subprocess import check_call
 from threading import Thread, Event
 from typing import List, Iterator, Callable, Dict, Optional
+from unittest import skip
 
-from git_tree import restructure_local, build_tree, Commit, create_temp_branch_name_provider, print_tree
+from git_tree import update_local_struct, build_tree, Commit, create_temp_branch_name_provider, print_tree, \
+    rebase_local_struct
 from utils.cmd import output
 
 OUTPUT_LINE_LEN = 100
@@ -21,8 +24,9 @@ class GitTestCase(unittest.TestCase):
         self.h2("resetting git")
 
         self.root_commit = next(output(["git", "log", "--reverse", "--pretty=format:%H"])).strip()
-        check_call(["git", "reset", self.root_commit, "--hard"])
+        check_call(["git", "reset", "--hard"])
         check_call(["git", "checkout", "master"])
+        check_call(["git", "reset", self.root_commit, "--hard"])
 
         for line in output(["git", "branch", '--format=%(refname:short)']):
             name = line.strip()
@@ -55,6 +59,31 @@ class GitTestCase(unittest.TestCase):
         self.h2("checking fixed tree")
         check()
 
+    def run_rebase_test(self,
+                        branches: List[str],
+                        onto: str,
+                        build_original: Callable[[], None],
+                        update_base: Callable[[], None],
+                        rebase_updated: Callable[[Commit], None],
+                        check: Callable[[], None]):
+        self.h2("building original tree")
+        build_original()
+        self.h3("original tree")
+        print_tree(capture_tree(self.root_commit, *branches, onto))
+
+        self.h2("updating %s" % onto)
+        update_base()
+        self.h3("updated tree")
+        print_tree(capture_tree(self.root_commit, *branches, onto))
+
+        self.h2("rebasing onto %s" % onto)
+        rebase_updated(capture_tree(self.root_commit, *branches))
+        self.h3("rebased tree")
+        print_tree(capture_tree(self.root_commit, *branches, onto))
+
+        self.h2("checking fixed tree")
+        check()
+
     def bar(self, char: str):
         print(char * OUTPUT_LINE_LEN)
 
@@ -76,7 +105,7 @@ class GitTestCase(unittest.TestCase):
         return (l_char * max_pad_size)[:l_pad] + " " + line + " " + (r_char * max_pad_size)[:r_pad]
 
 
-class TestLocalUpdateTest(GitTestCase):
+class TestUpdate(GitTestCase):
     def test_amend_branch(self):
         def build_original():
             create_branch(parent="master", name="branch-1", updates=[{"f": ["a", "b"]}])
@@ -184,6 +213,34 @@ class TestLocalUpdateTest(GitTestCase):
         )
 
 
+class TestRebase(GitTestCase):
+    def test_update(self):
+        def build_original():
+            create_branch(parent="master", name="branch-1", updates=[{"f": ["a", "b"]}])
+            create_branch(parent="branch-1", name="branch-2", updates=[{"f": ["a", "b", "c"]}])
+            create_branch(parent="master", name="branch-3", updates=[{"g": ["x", "y"]}])
+
+        def update_base():
+            update_branch(name="master", updates=[{"h": ["a", "b"]}])
+
+        def fix_updated(tree: Commit):
+            rebase(tree, "master")
+
+        def check_tree():
+            assert_branch(name="branch-1", contents={"f": ["a", "b"], "h": ["a", "b"]})
+            assert_branch(name="branch-2", contents={"f": ["a", "b", "c"], "h": ["a", "b"]})
+            assert_branch(name="branch-3", contents={"g": ["x", "y"], "h": ["a", "b"]})
+
+        self.run_rebase_test(
+            ["branch-1", "branch-2", "branch-3"],
+            "master",
+            build_original,
+            update_base,
+            fix_updated,
+            check_tree
+        )
+
+
 @dataclass
 class FileContent:
     name: str
@@ -194,10 +251,13 @@ class FileContent:
             f.write("\n".join(self.content))
 
     def check(self):
+        if not path.isfile(self.name_with_ext()):
+            raise Exception("File %s does not exist!" % self.name_with_ext())
         with open(self.name_with_ext(), mode="r", encoding="utf8") as f:
             file_lines = [l.rstrip() for l in f.readlines()]
             if file_lines != self.content:
-                raise Exception("File contents differ.\n\tExpected: %s\n\tObtained: %s" % (self.content, file_lines))
+                raise Exception("File contents of %s differ.\n\tExpected: %s\n\tObtained: %s" % (
+                    self.name_with_ext(), self.content, file_lines))
             print("%s is as expected" % self.short_descr())
 
     def name_with_ext(self):
@@ -241,9 +301,16 @@ def capture_tree(ancestor: str, *branches: str) -> Commit:
 
 
 def update(ideal_tree: Commit):
-    restructure_local(ideal_tree,
-                      create_temp_branch_name_provider(),
-                      CONFLICT_RESOLUTION_TIMEOUT_IN_SEC)
+    update_local_struct(ideal_tree,
+                        create_temp_branch_name_provider(),
+                        CONFLICT_RESOLUTION_TIMEOUT_IN_SEC)
+
+
+def rebase(local_tree: Commit, onto: str):
+    rebase_local_struct(local_tree,
+                        onto,
+                        create_temp_branch_name_provider(),
+                        CONFLICT_RESOLUTION_TIMEOUT_IN_SEC)
 
 
 def create_branch(parent: str, name: str, updates: List[Dict[str, List[str]]]):

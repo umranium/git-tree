@@ -30,20 +30,46 @@ def main():
 
     update = subparsers.add_parser(
         "update",
-        help="update local to reflect remote",
+        help="update local structure to reflect remote structure",
         description="Updates local branch tree/chain structure to reflect a remote tree/chain structure"
     )
 
-    update.add_argument("branches",
-                        metavar='branch-name',
-                        help='The name of a branch that is part of the tree/chain (must have a remote branch)',
-                        nargs='+',
-                        type=only_local_pushed_branches)
+    update.add_argument(
+        "branches",
+        metavar='branch-name',
+        help='The name of a local branch that is part of the tree/chain (must have a remote branch)',
+        nargs='+',
+        type=only_local_pushed_branches
+    )
+
+    rebase = subparsers.add_parser(
+        "rebase",
+        help="Rebase a local structure onto a local branch",
+        description="Rebase a local branch tree/chain structure onto another local branch"
+    )
+
+    rebase.add_argument(
+        "--onto",
+        metavar='new-base-branch',
+        help="Branch to rebase on (default is 'master')",
+        default='master',
+        type=only_local_branches
+    )
+
+    rebase.add_argument(
+        "branches",
+        metavar='branch-name',
+        help='The name of a local branch that is part of the tree/chain',
+        nargs='+',
+        type=only_local_branches
+    )
 
     args = parser.parse_args()
     subcommand = args.subcommand
     if subcommand == "update":
-        update_local_branches(args.branches, args.conflict_resolution_timeout)
+        process_update(args.branches, args.conflict_resolution_timeout)
+    elif subcommand == "rebase":
+        process_rebase(args.branches, args.onto, args.conflict_resolution_timeout)
 
 
 def only_local_pushed_branches(branch_name: str) -> Optional[str]:
@@ -51,6 +77,12 @@ def only_local_pushed_branches(branch_name: str) -> Optional[str]:
         raise argparse.ArgumentTypeError("'%s' is not a name of an existing local branch" % branch_name)
     if not git_branch_exists(branch_name, remote=True):
         raise argparse.ArgumentTypeError("'%s' does not have a remote branch" % branch_name)
+    return branch_name
+
+
+def only_local_branches(branch_name: str) -> Optional[str]:
+    if not git_branch_exists(branch_name, remote=False):
+        raise argparse.ArgumentTypeError("'%s' is not a name of an existing local branch" % branch_name)
     return branch_name
 
 
@@ -113,7 +145,7 @@ class Segment:
     end_full_hash: str
 
 
-def update_local_branches(branches: List[str], conflict_resolution_timeout_secs: int):
+def process_update(branches: List[str], conflict_resolution_timeout_secs: int):
     remote = git_remote()
     remote_branches = [qualify_branch(b, remote) for b in branches]
     ancestor = git_common_ancestor(branches + remote_branches)
@@ -128,17 +160,17 @@ def update_local_branches(branches: List[str], conflict_resolution_timeout_secs:
     print("Local tree:")
     print_tree(local_tree)
 
-    restructure_local(remote_tree,
-                      create_temp_branch_name_provider(),
-                      conflict_resolution_timeout_secs)
+    update_local_struct(remote_tree,
+                        create_temp_branch_name_provider(),
+                        conflict_resolution_timeout_secs)
 
     print("Updated local tree:")
     print_tree(build_tree(ancestor, branches))
 
 
-def restructure_local(remote_tree: Commit,
-                      temp_ref_name_provider: Callable[[str], str],
-                      conflict_resolution_timeout_secs: int):
+def update_local_struct(remote_tree: Commit,
+                        temp_ref_name_provider: Callable[[str], str],
+                        conflict_resolution_timeout_secs: int):
     old_to_new_name_map: Dict[str, str] = {}
 
     for segment in bfs_segments(remote_tree):
@@ -149,6 +181,56 @@ def restructure_local(remote_tree: Commit,
         else:
             new_ref = temp_ref_name_provider(old_ref)
             if segment.start_ref in old_to_new_name_map:
+                start_ref = old_to_new_name_map[segment.start_ref]
+            else:
+                start_ref = segment.start_ref
+            old_to_new_name_map[old_ref] = new_ref
+            log_cmd("git branch -b %s %s" % (new_ref, start_ref))
+            git_branch(new_ref, start_ref)
+
+        git_cherrypick_range(segment, conflict_resolution_timeout_secs)
+
+    for old_ref in old_to_new_name_map.keys():
+        git_delete_branch(old_ref)
+    for old_ref, new_ref in old_to_new_name_map.items():
+        git_rename_branch(new_ref, old_ref)
+
+
+def process_rebase(branches: List[str],
+                   onto: str,
+                   conflict_resolution_timeout_secs: int):
+    branch_ancestor = git_common_ancestor(branches + [onto])
+    local_tree = build_tree(branch_ancestor, branches)
+    verify_tree(local_tree)
+
+    print("Local tree:")
+    print_tree(local_tree)
+
+    rebase_local_struct(local_tree,
+                        onto,
+                        create_temp_branch_name_provider(),
+                        conflict_resolution_timeout_secs)
+
+    print("Updated local tree:")
+    print_tree(build_tree(branch_ancestor, branches))
+
+
+def rebase_local_struct(local_tree: Commit,
+                        base_branch: str,
+                        temp_ref_name_provider: Callable[[str], str],
+                        conflict_resolution_timeout_secs: int):
+    old_to_new_name_map: Dict[str, str] = {}
+
+    for segment in bfs_segments(local_tree, from_root=True):
+        old_ref = segment.end_ref
+        if old_ref in old_to_new_name_map:
+            log_cmd("git checkout %s" % old_to_new_name_map[old_ref])
+            git_checkout(old_to_new_name_map[old_ref])
+        else:
+            new_ref = temp_ref_name_provider(old_ref)
+            if segment.start_full_hash == local_tree.full_hash:  # is root
+                start_ref = base_branch
+            elif segment.start_ref in old_to_new_name_map:
                 start_ref = old_to_new_name_map[segment.start_ref]
             else:
                 start_ref = segment.start_ref
@@ -215,7 +297,7 @@ def build_tree(ancestor: str, branches: List[str], branch_names: Optional[List[s
     return commits[ancestor]
 
 
-def bfs_segments(root: Commit) -> Iterator[Segment]:
+def bfs_segments(root: Commit, from_root: bool = False) -> Iterator[Segment]:
     """
     Breadth-first search through the tree to extract segments
     """
@@ -254,6 +336,13 @@ def bfs_segments(root: Commit) -> Iterator[Segment]:
                 yield Segment(
                     start_ref=parent.seg_start_ref,
                     start_full_hash=parent.seg_start_hash,
+                    end_ref=new_entry.seg_start_ref,
+                    end_full_hash=new_entry.seg_start_hash
+                )
+            elif new_entry.seg_start_ref and from_root and parent.commit == root:
+                yield Segment(
+                    start_ref=root.first_ref(),
+                    start_full_hash=root.full_hash,
                     end_ref=new_entry.seg_start_ref,
                     end_full_hash=new_entry.seg_start_hash
                 )
