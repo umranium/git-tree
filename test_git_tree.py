@@ -111,6 +111,7 @@ class TestUpdate(GitTestCase):
             create_branch(parent="master", name="branch-1", updates=[{"f": ["a", "b"]}])
             create_branch(parent="branch-1", name="branch-2", updates=[{"f": ["a", "b", "c"]}])
             create_branch(parent="branch-2", name="branch-3", updates=[{"f": ["a", "b", "c", "d"]}])
+            create_branch(parent="branch-1", name="branch-4", updates=[{"f": ["a", "b", "d"]}])
 
         def update_original():
             amend_branch(name="branch-1", contents={"f": ["_", "a", "b"]})
@@ -122,9 +123,10 @@ class TestUpdate(GitTestCase):
             assert_branch(name="branch-1", contents={"f": ["_", "a", "b"]})
             assert_branch(name="branch-2", contents={"f": ["_", "a", "b", "c"]})
             assert_branch(name="branch-3", contents={"f": ["_", "a", "b", "c", "d"]})
+            assert_branch(name="branch-4", contents={"f": ["_", "a", "b", "d"]})
 
         self.run_update_test(
-            ["branch-1", "branch-2", "branch-3"],
+            ["branch-1", "branch-2", "branch-3", "branch-4"],
             build_original,
             update_original,
             fix_updated,
@@ -136,6 +138,7 @@ class TestUpdate(GitTestCase):
             create_branch(parent="master", name="branch-1", updates=[{"f": ["a", "b"]}])
             create_branch(parent="branch-1", name="branch-2", updates=[{"f": ["a", "b", "c"]}])
             create_branch(parent="branch-2", name="branch-3", updates=[{"f": ["a", "b", "c", "d"]}])
+            create_branch(parent="branch-1", name="branch-4", updates=[{"f": ["a", "b", "d"]}])
 
         def update_original():
             update_branch(name="branch-1", updates=[
@@ -150,16 +153,17 @@ class TestUpdate(GitTestCase):
             assert_branch(name="branch-1", contents={"f": ["_", "-", "a", "b"]})
             assert_branch(name="branch-2", contents={"f": ["_", "-", "a", "b", "c"]})
             assert_branch(name="branch-3", contents={"f": ["_", "-", "a", "b", "c", "d"]})
+            assert_branch(name="branch-4", contents={"f": ["_", "-", "a", "b", "d"]})
 
         self.run_update_test(
-            ["branch-1", "branch-2", "branch-3"],
+            ["branch-1", "branch-2", "branch-3", "branch-4"],
             build_original,
             update_original,
             fix_updated,
             check_tree
         )
 
-    def test_conflicting_amend_branch(self):
+    def test_amend_branch_with_conflicts(self):
         def build_original():
             create_branch(parent="master", name="branch-1", updates=[{"f": ["a", "b"]}])
             create_branch(parent="branch-1", name="branch-2", updates=[{"f": ["a", "b", "c"]}])
@@ -185,7 +189,7 @@ class TestUpdate(GitTestCase):
             check_tree
         )
 
-    def test_multiple_conflicting_amend_branch(self):
+    def test_amend_branch_with_multiple_conflicts(self):
         def build_original():
             create_branch(parent="master", name="branch-1", updates=[{"f": ["a", "b"]}])
             create_branch(parent="branch-1", name="branch-2", updates=[{"f": ["a", "b", "c"]}])
