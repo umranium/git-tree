@@ -7,9 +7,8 @@ from dataclasses import dataclass
 from subprocess import check_call
 from threading import Thread, Event
 from typing import List, Iterator, Callable, Dict, Optional
-from unittest import skip
 
-from branch_restruct import restructure_local, build_tree, Commit, create_temp_branch_name_provider, print_tree
+from git_tree import restructure_local, build_tree, Commit, create_temp_branch_name_provider, print_tree
 from utils.cmd import output
 
 OUTPUT_LINE_LEN = 100
@@ -78,7 +77,6 @@ class GitTestCase(unittest.TestCase):
 
 
 class TestLocalUpdateTest(GitTestCase):
-    @skip
     def test_amend_branch(self):
         def build_original():
             create_branch(parent="master", name="branch-1", updates=[{"f": ["a", "b"]}])
@@ -104,7 +102,6 @@ class TestLocalUpdateTest(GitTestCase):
             check_tree
         )
 
-    @skip
     def test_update_branch(self):
         def build_original():
             create_branch(parent="master", name="branch-1", updates=[{"f": ["a", "b"]}])
@@ -133,7 +130,6 @@ class TestLocalUpdateTest(GitTestCase):
             check_tree
         )
 
-    @skip
     def test_conflicting_amend_branch(self):
         def build_original():
             create_branch(parent="master", name="branch-1", updates=[{"f": ["a", "b"]}])

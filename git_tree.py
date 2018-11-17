@@ -9,7 +9,7 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 from subprocess import CalledProcessError
-from typing import Optional, List, Iterator, Callable, Tuple, Dict, Deque, Iterable
+from typing import Optional, List, Iterator, Callable, Dict, Deque, Iterable
 
 from utils.cmd import output
 from utils.git import git_ref_hash, git_checkout, git_branch, git_delete_branch, git_rename_branch, git_remote, \
@@ -19,7 +19,7 @@ DEFAULT_CONFLICT_RESOLUTION_TIMEOUT_IN_SEC = 24 * 60 * 60
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Utility for working on tree/chain branches")
+    parser = argparse.ArgumentParser(description="Utility for working on GIT tree/chain branches")
 
     parser.add_argument("--conflict_resolution_timeout",
                         help='The amount of time to wait for conflicts to be resolved (in seconds)',
