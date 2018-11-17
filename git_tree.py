@@ -112,10 +112,11 @@ class Segment:
 
 def update_local_branches(branches: List[str], conflict_resolution_timeout_secs: int):
     remote = git_remote()
-    ancestor = all_branch_common_ancestor_hash(remote, branches)
-    remote_tree = build_tree(ancestor, branches, remote=remote)
+    remote_branches = [qualify_branch(b, remote) for b in branches]
+    ancestor = git_common_ancestor(branches + remote_branches)
+    remote_tree = build_tree(ancestor, remote_branches, branches)
     verify_tree(remote_tree)
-    local_tree = build_tree(ancestor, branches, remote=None)
+    local_tree = build_tree(ancestor, branches)
     verify_tree(local_tree)
 
     print("Remote tree:")
@@ -129,7 +130,7 @@ def update_local_branches(branches: List[str], conflict_resolution_timeout_secs:
                       conflict_resolution_timeout_secs)
 
     print("Updated local tree:")
-    print_tree(build_tree(ancestor, branches, remote=None))
+    print_tree(build_tree(ancestor, branches))
 
 
 def restructure_local(remote_tree: Commit,
@@ -170,18 +171,19 @@ def verify_tree(root: Commit):
                             "Commits with multiple references are not supported.")
 
 
-def build_tree(ancestor: str, branches: List[str], remote: Optional[str]) -> Commit:
-    resolved_branches = [qualify_branch(b, remote) for b in branches]
+def build_tree(ancestor: str, branches: List[str], branch_names: Optional[List[str]] = None) -> Commit:
+    if not branch_names:
+        branch_names = branches
 
     hash_to_log_map: Dict[str, GitLog] = {ancestor: git_log_commit(ancestor, skip_parent_hashes=True)}
 
     # assign branch names to ancestor
-    for branch, resolved in zip(branches, resolved_branches):
-        if git_ref_hash(resolved) == ancestor:
-            hash_to_log_map[ancestor].refs.append(branch)
+    for name, branch in zip(branch_names, branches):
+        if git_ref_hash(branch) == ancestor:
+            hash_to_log_map[ancestor].refs.append(name)
 
-    for branch, resolved in zip(branches, resolved_branches):
-        commit_range_details = list(git_log_range(ancestor, resolved))
+    for name, branch in zip(branch_names, branches):
+        commit_range_details = list(git_log_range(ancestor, branch))
 
         # add logs to map if not already existing
         for details in commit_range_details:
@@ -191,7 +193,7 @@ def build_tree(ancestor: str, branches: List[str], remote: Optional[str]) -> Com
         # assign branch name
         if commit_range_details:
             last_hash = commit_range_details[0].full_hash
-            hash_to_log_map[last_hash].refs.append(branch)
+            hash_to_log_map[last_hash].refs.append(name)
 
     # create commits and invert hierarchy
     commits: Dict[str, Commit] = {
@@ -282,11 +284,6 @@ def wait_for_conflict_resolution(timeout_secs: int, base_error: Exception):
         if time.time() - start > timeout_secs:
             raise RuntimeError("Conflict not resolved in time", base_error)
         time.sleep(0.1)
-
-
-def all_branch_common_ancestor_hash(remote: str, local_branches: List[str]):
-    remote_branches = [qualify_branch(b, remote) for b in local_branches]
-    return git_common_ancestor(local_branches + remote_branches)
 
 
 def create_temp_branch_name_provider() -> Callable[[str], str]:

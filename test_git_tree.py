@@ -237,7 +237,7 @@ class CommitUpdate:
 
 
 def capture_tree(ancestor: str, *branches: str) -> Commit:
-    return build_tree(ancestor, [*branches], remote=None)
+    return build_tree(ancestor, [*branches])
 
 
 def update(ideal_tree: Commit):
