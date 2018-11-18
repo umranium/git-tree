@@ -21,12 +21,12 @@ def git_remote() -> str:
     return next(output(['git', 'remote']), None)
 
 
-def git_common_ancestor(commits: List[str]) -> str:
+def git_common_ancestor(*commits: str) -> str:
     """
     :param commits: list of hash or reference to commits
     :return: the hash of the common ancestor of the commits given
     """
-    return next(output(['git', 'merge-base', *commits]))
+    return next(output(['git', 'merge-base', '--octopus', *commits]))
 
 
 def git_ref_hash(reference: str) -> str:

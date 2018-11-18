@@ -148,7 +148,7 @@ class Segment:
 def process_update(branches: List[str], conflict_resolution_timeout_secs: int):
     remote = git_remote()
     remote_branches = [qualify_branch(b, remote) for b in branches]
-    ancestor = git_common_ancestor(branches + remote_branches)
+    ancestor = git_common_ancestor(*branches, *remote_branches)
     remote_tree = build_tree(ancestor, remote_branches, branches)
     verify_tree(remote_tree)
     local_tree = build_tree(ancestor, branches)
@@ -199,26 +199,26 @@ def update_local_struct(remote_tree: Commit,
 def process_rebase(branches: List[str],
                    onto: str,
                    conflict_resolution_timeout_secs: int):
-    branch_ancestor = git_common_ancestor(branches + [onto])
+    rebase_local_struct(branches,
+                        onto,
+                        create_temp_branch_name_provider(),
+                        conflict_resolution_timeout_secs,
+                        debug_tree=True)
+
+
+def rebase_local_struct(branches: List[str],
+                        base_branch: str,
+                        temp_ref_name_provider: Callable[[str], str],
+                        conflict_resolution_timeout_secs: int,
+                        debug_tree: bool):
+    branch_ancestor = git_common_ancestor(*branches, base_branch)
     local_tree = build_tree(branch_ancestor, branches)
     verify_tree(local_tree)
 
-    print("Local tree:")
-    print_tree(local_tree)
+    if debug_tree:
+        print("Local tree:")
+        print_tree(local_tree)
 
-    rebase_local_struct(local_tree,
-                        onto,
-                        create_temp_branch_name_provider(),
-                        conflict_resolution_timeout_secs)
-
-    print("Updated local tree:")
-    print_tree(build_tree(branch_ancestor, branches))
-
-
-def rebase_local_struct(local_tree: Commit,
-                        base_branch: str,
-                        temp_ref_name_provider: Callable[[str], str],
-                        conflict_resolution_timeout_secs: int):
     old_to_new_name_map: Dict[str, str] = {}
 
     for segment in bfs_segments(local_tree, from_root=True):
@@ -244,6 +244,10 @@ def rebase_local_struct(local_tree: Commit,
         git_delete_branch(old_ref)
     for old_ref, new_ref in old_to_new_name_map.items():
         git_rename_branch(new_ref, old_ref)
+
+    if debug_tree:
+        print("Updated local tree:")
+        print_tree(build_tree(branch_ancestor, branches))
 
 
 def verify_tree(root: Commit):
@@ -309,28 +313,34 @@ def bfs_segments(root: Commit, from_root: bool = False) -> Iterator[Segment]:
         seg_start_hash: Optional[str]
 
         @staticmethod
-        def from_commit(commit: Commit, parent: Optional[Entry]) -> Entry:
+        def root(commit: Commit) -> Entry:
+            if from_root:
+                return Entry(commit=commit,
+                             seg_start_ref=commit.first_ref(),
+                             seg_start_hash=commit.full_hash)
+            else:
+                return Entry(commit=commit,
+                             seg_start_ref=None,
+                             seg_start_hash=None)
+
+        @staticmethod
+        def child(commit: Commit, par: Entry) -> Entry:
             if commit.refs:
                 return Entry(commit=commit,
                              seg_start_ref=commit.first_ref(),
                              seg_start_hash=commit.full_hash)
             else:
-                if parent:
-                    return Entry(commit=commit,
-                                 seg_start_ref=parent.seg_start_ref,
-                                 seg_start_hash=parent.seg_start_hash)
-                else:
-                    return Entry(commit=commit,
-                                 seg_start_ref=None,
-                                 seg_start_hash=None)
+                return Entry(commit=commit,
+                             seg_start_ref=par.seg_start_ref,
+                             seg_start_hash=par.seg_start_hash)
 
     queue: Deque[Entry] = deque()
 
-    queue.append(Entry.from_commit(root, parent=None))
+    queue.append(Entry.root(root))
     while queue:
         parent = queue.popleft()
         for c in parent.commit.children:
-            new_entry = Entry.from_commit(c, parent)
+            new_entry = Entry.child(c, parent)
             queue.append(new_entry)
             if new_entry.seg_start_ref and parent.seg_start_ref and new_entry.seg_start_ref != parent.seg_start_ref:
                 yield Segment(
@@ -339,7 +349,7 @@ def bfs_segments(root: Commit, from_root: bool = False) -> Iterator[Segment]:
                     end_ref=new_entry.seg_start_ref,
                     end_full_hash=new_entry.seg_start_hash
                 )
-            elif new_entry.seg_start_ref and from_root and parent.commit == root:
+            elif new_entry.seg_start_ref and from_root and parent.seg_start_hash == root.full_hash:
                 yield Segment(
                     start_ref=root.first_ref(),
                     start_full_hash=root.full_hash,
@@ -350,7 +360,7 @@ def bfs_segments(root: Commit, from_root: bool = False) -> Iterator[Segment]:
 
 def git_cherrypick_range(segment: Segment, conflict_resolution_timeout_secs: int):
     commits = [log.full_hash for log in git_log_range(segment.start_full_hash, segment.end_ref)]
-    for commit in commits:
+    for commit in reversed(commits):
         try:
             log_cmd("cherry-pick %s" % commit)
             git_cherrypick(commit)

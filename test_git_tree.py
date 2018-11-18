@@ -8,7 +8,6 @@ from os import path
 from subprocess import check_call
 from threading import Thread, Event
 from typing import List, Iterator, Callable, Dict, Optional
-from unittest import skip
 
 from git_tree import update_local_struct, build_tree, Commit, create_temp_branch_name_provider, print_tree, \
     rebase_local_struct
@@ -64,7 +63,7 @@ class GitTestCase(unittest.TestCase):
                         onto: str,
                         build_original: Callable[[], None],
                         update_base: Callable[[], None],
-                        rebase_updated: Callable[[Commit], None],
+                        rebase_updated: Callable[[List[str], str], None],
                         check: Callable[[], None]):
         self.h2("building original tree")
         build_original()
@@ -77,7 +76,7 @@ class GitTestCase(unittest.TestCase):
         print_tree(capture_tree(self.root_commit, *branches, onto))
 
         self.h2("rebasing onto %s" % onto)
-        rebase_updated(capture_tree(self.root_commit, *branches))
+        rebase_updated(branches, onto)
         self.h3("rebased tree")
         print_tree(capture_tree(self.root_commit, *branches, onto))
 
@@ -220,27 +219,26 @@ class TestUpdate(GitTestCase):
 class TestRebase(GitTestCase):
     def test_update(self):
         def build_original():
-            create_branch(parent="master", name="branch-1", updates=[{"f": ["a", "b"]}])
+            create_branch(parent="master", name="base-branch", updates=[{"f": ["a"]}])
+            create_branch(parent="base-branch", name="branch-1", updates=[{"f": ["a", "b"]}])
             create_branch(parent="branch-1", name="branch-2", updates=[{"f": ["a", "b", "c"]}])
-            create_branch(parent="master", name="branch-3", updates=[{"g": ["x", "y"]}])
+            create_branch(parent="base-branch", name="branch-3", updates=[{"g": ["x", "y"]}])
 
         def update_base():
-            update_branch(name="master", updates=[{"h": ["a", "b"]}])
-
-        def fix_updated(tree: Commit):
-            rebase(tree, "master")
+            update_branch(name="base-branch", updates=[{"h": ["p", "q"]}])
 
         def check_tree():
-            assert_branch(name="branch-1", contents={"f": ["a", "b"], "h": ["a", "b"]})
-            assert_branch(name="branch-2", contents={"f": ["a", "b", "c"], "h": ["a", "b"]})
-            assert_branch(name="branch-3", contents={"g": ["x", "y"], "h": ["a", "b"]})
+            assert_branch(name="base-branch", contents={"f": ["a"], "h": ["p", "q"]})
+            assert_branch(name="branch-1", contents={"f": ["a", "b"], "h": ["p", "q"]})
+            assert_branch(name="branch-2", contents={"f": ["a", "b", "c"], "h": ["p", "q"]})
+            assert_branch(name="branch-3", contents={"g": ["x", "y"], "h": ["p", "q"]})
 
         self.run_rebase_test(
             ["branch-1", "branch-2", "branch-3"],
-            "master",
+            "base-branch",
             build_original,
             update_base,
-            fix_updated,
+            rebase,
             check_tree
         )
 
@@ -310,11 +308,12 @@ def update(ideal_tree: Commit):
                         CONFLICT_RESOLUTION_TIMEOUT_IN_SEC)
 
 
-def rebase(local_tree: Commit, onto: str):
-    rebase_local_struct(local_tree,
+def rebase(branches: List[str], onto: str):
+    rebase_local_struct(branches,
                         onto,
                         create_temp_branch_name_provider(),
-                        CONFLICT_RESOLUTION_TIMEOUT_IN_SEC)
+                        CONFLICT_RESOLUTION_TIMEOUT_IN_SEC,
+                        debug_tree=True)
 
 
 def create_branch(parent: str, name: str, updates: List[Dict[str, List[str]]]):
