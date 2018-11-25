@@ -112,7 +112,9 @@ c0 <---- c5 <---- c2 <---- c3
                           branch-2
 ```
 
-### To "rebase" a local branch structure when the remote get's updated   
+### To "rebase" a local branch structure when the remote get's updated
+
+#### "Rebase" the branch structure with all the branches
 
 ```bash
 git_tree rebase --onto base-branch branch-name [branch-name ...]
@@ -165,4 +167,64 @@ c0 <---- c5 <---- c1 <---- c2 <---- c3
                        `- c4
                           |
                           branch-2
+```
+
+#### "Rebase" the branch structure without the root branch
+
+```bash
+git_tree rebase-wo-root --onto base-branch branch-name [branch-name ...]
+```
+
+For example:
+
+You have the following branch structure (yeah same one again):
+
+```
+master    base-branch      branch-1
+|         |                |
+c0 <---- c1 <---- c2 <---- c3
+             \
+              `- c4
+                 |
+                 branch-2
+```
+
+Your PR(s) get accepted, and squash and merge `base-branch` onto `master`.
+After pulling the changes, you have the following structure:
+
+```
+         master
+         |
+     ,-- c5
+    /
+c0 <-    base-branch       branch-1
+    \    |                 |
+     `-- c1 <---- c2 <---- c3
+             \
+              `- c4
+                 |
+                 branch-2
+```
+
+At this point, remote doesn't have the original branch structure, and neither does local.
+
+In addition, the changes in `c5` are in fact, the changes in `base-branch`.
+
+You can rebase the whole structure onto `master` but you don't need to rebase (and shouldn't) `base-branch` onto `master`.
+
+To "rebase" `branch-1` and `branch-2` onto `master` but leave out `base-branch`:
+ 
+```bash
+git_tree rebase-wo-root --onto master base-branch branch-1 branch-2
+```
+
+End result:
+```
+         master             branch-1
+         |                  |
+c0 <---- c5  <---- c2 <---- c3
+              \
+               `- c4
+                  |
+                  branch-2
 ```

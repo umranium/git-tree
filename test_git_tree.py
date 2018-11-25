@@ -10,7 +10,7 @@ from threading import Thread, Event
 from typing import List, Iterator, Callable, Dict, Optional
 
 from git_tree import update_local_struct, build_tree, Commit, create_temp_branch_name_provider, print_tree, \
-    rebase_local_struct
+    rebase_without_root, rebase_with_root
 from utils.cmd import output
 
 OUTPUT_LINE_LEN = 100
@@ -217,7 +217,7 @@ class TestUpdate(GitTestCase):
 
 
 class TestRebase(GitTestCase):
-    def test_update(self):
+    def test_update_with_root(self):
         def build_original():
             create_branch(parent="master", name="base-branch", updates=[{"f": ["a"]}])
             create_branch(parent="base-branch", name="branch-1", updates=[{"f": ["a", "b"]}])
@@ -238,7 +238,32 @@ class TestRebase(GitTestCase):
             "base-branch",
             build_original,
             update_base,
-            rebase,
+            call_rebase_with_root,
+            check_tree
+        )
+
+    def test_update_without_root(self):
+        def build_original():
+            create_branch(parent="master", name="base-branch", updates=[{"f": ["a"]}])
+            create_branch(parent="base-branch", name="branch-1", updates=[{"f": ["a", "b"]}])
+            create_branch(parent="branch-1", name="branch-2", updates=[{"f": ["a", "b", "c"]}])
+            create_branch(parent="base-branch", name="branch-3", updates=[{"g": ["x", "y"]}])
+
+        def update_base():
+            update_branch(name="master", updates=[{"f": ["a"], "h": ["p", "q"]}])
+
+        def check_tree():
+            assert_branch(name="base-branch", contents={"f": ["a"]})
+            assert_branch(name="branch-1", contents={"f": ["a", "b"], "h": ["p", "q"]})
+            assert_branch(name="branch-2", contents={"f": ["a", "b", "c"], "h": ["p", "q"]})
+            assert_branch(name="branch-3", contents={"g": ["x", "y"], "h": ["p", "q"]})
+
+        self.run_rebase_test(
+            ["branch-1", "branch-2", "branch-3", "base-branch"],
+            "master",
+            build_original,
+            update_base,
+            call_rebase_without_root,
             check_tree
         )
 
@@ -308,8 +333,16 @@ def update(ideal_tree: Commit):
                         CONFLICT_RESOLUTION_TIMEOUT_IN_SEC)
 
 
-def rebase(branches: List[str], onto: str):
-    rebase_local_struct(branches,
+def call_rebase_with_root(branches: List[str], onto: str):
+    rebase_with_root(branches,
+                     onto,
+                     create_temp_branch_name_provider(),
+                     CONFLICT_RESOLUTION_TIMEOUT_IN_SEC,
+                     debug_tree=True)
+
+
+def call_rebase_without_root(branches: List[str], onto: str):
+    rebase_without_root(branches,
                         onto,
                         create_temp_branch_name_provider(),
                         CONFLICT_RESOLUTION_TIMEOUT_IN_SEC,

@@ -64,12 +64,36 @@ def main():
         type=only_local_branches
     )
 
+    rebase_wo_root = subparsers.add_parser(
+        "rebase-wo-root",
+        help="Rebase a branch structure onto another branch without the root branch of the branch structure",
+        description="Rebase a branch tree/chain structure onto another branch without the root branch of the structure"
+    )
+
+    rebase_wo_root.add_argument(
+        "--onto",
+        metavar='new-base-branch',
+        help="Branch to rebase on (default is 'master')",
+        default='master',
+        type=only_local_branches
+    )
+
+    rebase_wo_root.add_argument(
+        "branches",
+        metavar='branch-name',
+        help='The name of a local branch that is part of the tree/chain',
+        nargs='+',
+        type=only_local_branches
+    )
+
     args = parser.parse_args()
     subcommand = args.subcommand
     if subcommand == "update":
         process_update(args.branches, args.conflict_resolution_timeout)
     elif subcommand == "rebase":
         process_rebase(args.branches, args.onto, args.conflict_resolution_timeout)
+    elif subcommand == "rebase-wo-root":
+        process_rebase_without_root(args.branches, args.onto, args.conflict_resolution_timeout)
 
 
 def only_local_pushed_branches(branch_name: str) -> Optional[str]:
@@ -199,18 +223,18 @@ def update_local_struct(remote_tree: Commit,
 def process_rebase(branches: List[str],
                    onto: str,
                    conflict_resolution_timeout_secs: int):
-    rebase_local_struct(branches,
-                        onto,
-                        create_temp_branch_name_provider(),
-                        conflict_resolution_timeout_secs,
-                        debug_tree=True)
+    rebase_with_root(branches,
+                     onto,
+                     create_temp_branch_name_provider(),
+                     conflict_resolution_timeout_secs,
+                     debug_tree=True)
 
 
-def rebase_local_struct(branches: List[str],
-                        base_branch: str,
-                        temp_ref_name_provider: Callable[[str], str],
-                        conflict_resolution_timeout_secs: int,
-                        debug_tree: bool):
+def rebase_with_root(branches: List[str],
+                     base_branch: str,
+                     temp_ref_name_provider: Callable[[str], str],
+                     conflict_resolution_timeout_secs: int,
+                     debug_tree: bool):
     branch_ancestor = git_common_ancestor(*branches, base_branch)
     local_tree = build_tree(branch_ancestor, branches)
     verify_tree(local_tree)
@@ -248,6 +272,61 @@ def rebase_local_struct(branches: List[str],
     if debug_tree:
         print("Updated local tree:")
         print_tree(build_tree(branch_ancestor, branches))
+
+
+def process_rebase_without_root(branches: List[str],
+                                onto: str,
+                                conflict_resolution_timeout_secs: int):
+    rebase_without_root(branches,
+                        onto,
+                        create_temp_branch_name_provider(),
+                        conflict_resolution_timeout_secs,
+                        debug_tree=True)
+
+
+def rebase_without_root(branches: List[str],
+                        base_branch: str,
+                        temp_ref_name_provider: Callable[[str], str],
+                        conflict_resolution_timeout_secs: int,
+                        debug_tree: bool):
+    branch_ancestor = git_common_ancestor(*branches)
+    local_tree = build_tree(branch_ancestor, branches)
+    verify_tree(local_tree)
+
+    if debug_tree:
+        print("Local tree:")
+        print_tree(build_tree(git_common_ancestor(*branches, base_branch), branches + [base_branch]))
+
+    old_to_new_name_map: Dict[str, str] = {}
+
+    for segment in bfs_segments(local_tree, from_root=True):
+        print(segment)
+        old_ref = segment.end_ref
+        if old_ref in old_to_new_name_map:
+            log_cmd("git checkout %s" % old_to_new_name_map[old_ref])
+            git_checkout(old_to_new_name_map[old_ref])
+        else:
+            new_ref = temp_ref_name_provider(old_ref)
+            if segment.start_full_hash == local_tree.full_hash:  # is root
+                start_ref = base_branch
+            elif segment.start_ref in old_to_new_name_map:
+                start_ref = old_to_new_name_map[segment.start_ref]
+            else:
+                start_ref = segment.start_ref
+            old_to_new_name_map[old_ref] = new_ref
+            log_cmd("git branch -b %s %s" % (new_ref, start_ref))
+            git_branch(new_ref, start_ref)
+
+        git_cherrypick_range(segment, conflict_resolution_timeout_secs)
+
+    for old_ref in old_to_new_name_map.keys():
+        git_delete_branch(old_ref)
+    for old_ref, new_ref in old_to_new_name_map.items():
+        git_rename_branch(new_ref, old_ref)
+
+    if debug_tree:
+        print("Updated local tree:")
+        print_tree(build_tree(git_common_ancestor(*branches, base_branch), branches + [base_branch]))
 
 
 def verify_tree(root: Commit):
