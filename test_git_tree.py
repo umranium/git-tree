@@ -12,6 +12,7 @@ from typing import List, Iterator, Callable, Dict, Optional
 from git_tree import update_local_struct, build_tree, Commit, create_temp_branch_name_provider, print_tree, \
     rebase_without_root, rebase_with_root
 from utils.cmd import output
+from utils.git import git_common_ancestor
 
 OUTPUT_LINE_LEN = 100
 CONFLICT_RESOLUTION_TIMEOUT_IN_SEC = 5
@@ -41,7 +42,7 @@ class GitTestCase(unittest.TestCase):
                         check: Callable[[], None]):
         self.h2("building original tree")
         build_original()
-        original_tree = capture_tree(self.root_commit, *branches)
+        original_tree = capture_tree(git_common_ancestor(*branches), *branches)
         self.h3("original tree")
         print_tree(original_tree)
 

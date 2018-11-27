@@ -192,12 +192,13 @@ def process_update(branches: List[str], conflict_resolution_timeout_secs: int):
     print_tree(build_tree(ancestor, branches))
 
 
-def update_local_struct(remote_tree: Commit,
+def update_local_struct(required_tree: Commit,
                         temp_ref_name_provider: Callable[[str], str],
                         conflict_resolution_timeout_secs: int):
     old_to_new_name_map: Dict[str, str] = {}
 
-    for segment in bfs_segments(remote_tree):
+    for segment in bfs_segments(required_tree):
+        print("segment", segment)
         old_ref = segment.end_ref
         if old_ref in old_to_new_name_map:
             log_cmd("git checkout %s" % old_to_new_name_map[old_ref])
@@ -245,7 +246,7 @@ def rebase_with_root(branches: List[str],
 
     old_to_new_name_map: Dict[str, str] = {}
 
-    for segment in bfs_segments(local_tree, from_root=True):
+    for segment in bfs_segments(local_tree):
         old_ref = segment.end_ref
         if old_ref in old_to_new_name_map:
             log_cmd("git checkout %s" % old_to_new_name_map[old_ref])
@@ -299,7 +300,7 @@ def rebase_without_root(branches: List[str],
 
     old_to_new_name_map: Dict[str, str] = {}
 
-    for segment in bfs_segments(local_tree, from_root=True):
+    for segment in bfs_segments(local_tree):
         print(segment)
         old_ref = segment.end_ref
         if old_ref in old_to_new_name_map:
@@ -380,7 +381,7 @@ def build_tree(ancestor: str, branches: List[str], branch_names: Optional[List[s
     return commits[ancestor]
 
 
-def bfs_segments(root: Commit, from_root: bool = False) -> Iterator[Segment]:
+def bfs_segments(root: Commit) -> Iterator[Segment]:
     """
     Breadth-first search through the tree to extract segments
     """
@@ -393,14 +394,9 @@ def bfs_segments(root: Commit, from_root: bool = False) -> Iterator[Segment]:
 
         @staticmethod
         def root(commit: Commit) -> Entry:
-            if from_root:
-                return Entry(commit=commit,
-                             seg_start_ref=commit.first_ref(),
-                             seg_start_hash=commit.full_hash)
-            else:
-                return Entry(commit=commit,
-                             seg_start_ref=None,
-                             seg_start_hash=None)
+            return Entry(commit=commit,
+                         seg_start_ref=commit.first_ref(),
+                         seg_start_hash=commit.full_hash)
 
         @staticmethod
         def child(commit: Commit, par: Entry) -> Entry:
@@ -428,7 +424,7 @@ def bfs_segments(root: Commit, from_root: bool = False) -> Iterator[Segment]:
                     end_ref=new_entry.seg_start_ref,
                     end_full_hash=new_entry.seg_start_hash
                 )
-            elif new_entry.seg_start_ref and from_root and parent.seg_start_hash == root.full_hash:
+            elif new_entry.seg_start_ref and parent.seg_start_hash == root.full_hash:
                 yield Segment(
                     start_ref=root.first_ref(),
                     start_full_hash=root.full_hash,
