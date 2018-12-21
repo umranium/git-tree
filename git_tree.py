@@ -57,28 +57,13 @@ def main():
     )
 
     rebase.add_argument(
-        "branches",
-        metavar='branch-name',
-        help='The name of a local branch that is part of the tree/chain',
-        nargs='+',
-        type=only_local_branches
+        "--wo-root",
+        help="Skip the root branch in the branch structure to rebase",
+        action='store_true',
+        default=False
     )
 
-    rebase_wo_root = subparsers.add_parser(
-        "rebase-wo-root",
-        help="Rebase a branch structure onto another branch without the root branch of the branch structure",
-        description="Rebase a branch tree/chain structure onto another branch without the root branch of the structure"
-    )
-
-    rebase_wo_root.add_argument(
-        "--onto",
-        metavar='new-base-branch',
-        help="Branch to rebase on (default is 'master')",
-        default='master',
-        type=only_local_branches
-    )
-
-    rebase_wo_root.add_argument(
+    rebase.add_argument(
         "branches",
         metavar='branch-name',
         help='The name of a local branch that is part of the tree/chain',
@@ -91,9 +76,7 @@ def main():
     if subcommand == "update":
         process_update(args.branches, args.conflict_resolution_timeout)
     elif subcommand == "rebase":
-        process_rebase(args.branches, args.onto, args.conflict_resolution_timeout)
-    elif subcommand == "rebase-wo-root":
-        process_rebase_without_root(args.branches, args.onto, args.conflict_resolution_timeout)
+        process_rebase(args.branches, args.onto, args.wo_root, args.conflict_resolution_timeout)
 
 
 def only_local_pushed_branches(branch_name: str) -> Optional[str]:
@@ -223,12 +206,20 @@ def update_local_struct(required_tree: Commit,
 
 def process_rebase(branches: List[str],
                    onto: str,
+                   without_root: bool,
                    conflict_resolution_timeout_secs: int):
-    rebase_with_root(branches,
-                     onto,
-                     create_temp_branch_name_provider(),
-                     conflict_resolution_timeout_secs,
-                     debug_tree=True)
+    if without_root:
+        rebase_without_root(branches,
+                            onto,
+                            create_temp_branch_name_provider(),
+                            conflict_resolution_timeout_secs,
+                            debug_tree=True)
+    else:
+        rebase_with_root(branches,
+                         onto,
+                         create_temp_branch_name_provider(),
+                         conflict_resolution_timeout_secs,
+                         debug_tree=True)
 
 
 def rebase_with_root(branches: List[str],
@@ -273,16 +264,6 @@ def rebase_with_root(branches: List[str],
     if debug_tree:
         print("Updated local tree:")
         print_tree(build_tree(branch_ancestor, branches))
-
-
-def process_rebase_without_root(branches: List[str],
-                                onto: str,
-                                conflict_resolution_timeout_secs: int):
-    rebase_without_root(branches,
-                        onto,
-                        create_temp_branch_name_provider(),
-                        conflict_resolution_timeout_secs,
-                        debug_tree=True)
 
 
 def rebase_without_root(branches: List[str],

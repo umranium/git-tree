@@ -172,7 +172,7 @@ c0 <---- c5 <---- c1 <---- c2 <---- c3
 #### "Rebase" the branch structure without the root branch
 
 ```bash
-git_tree rebase-wo-root --onto base-branch branch-name [branch-name ...]
+git_tree rebase --onto base-branch --wo-root branch-name [branch-name ...]
 ```
 
 For example:
@@ -215,7 +215,7 @@ You can rebase the whole structure onto `master` but you don't need to rebase (a
 To "rebase" `branch-1` and `branch-2` onto `master` but leave out `base-branch`:
  
 ```bash
-git_tree rebase-wo-root --onto master base-branch branch-1 branch-2
+git_tree rebase --onto master --wo-root base-branch branch-1 branch-2
 ```
 
 End result:
