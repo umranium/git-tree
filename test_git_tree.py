@@ -8,9 +8,11 @@ from os import path
 from subprocess import check_call
 from threading import Thread, Event
 from typing import List, Iterator, Callable, Dict, Optional
+from unittest import mock
+from unittest.mock import patch, ANY
 
 from git_tree import update_local_struct, build_tree, Commit, create_temp_branch_name_provider, print_tree, \
-    rebase_without_root, rebase_with_root
+    rebase_without_root, rebase_with_root, process_push
 from utils.cmd import output
 from utils.git import git_common_ancestor
 
@@ -105,168 +107,202 @@ class GitTestCase(unittest.TestCase):
         return (l_char * max_pad_size)[:l_pad] + " " + line + " " + (r_char * max_pad_size)[:r_pad]
 
 
-class TestUpdate(GitTestCase):
-    def test_amend_branch(self):
-        def build_original():
-            create_branch(parent="master", name="branch-1", updates=[{"f": ["a", "b"]}])
-            create_branch(parent="branch-1", name="branch-2", updates=[{"f": ["a", "b", "c"]}])
-            create_branch(parent="branch-2", name="branch-3", updates=[{"f": ["a", "b", "c", "d"]}])
-            create_branch(parent="branch-1", name="branch-4", updates=[{"f": ["a", "b", "d"]}])
+# class TestUpdate(GitTestCase):
+#     def test_amend_branch(self):
+#         def build_original():
+#             create_branch(parent="master", name="branch-1", updates=[{"f": ["a", "b"]}])
+#             create_branch(parent="branch-1", name="branch-2", updates=[{"f": ["a", "b", "c"]}])
+#             create_branch(parent="branch-2", name="branch-3", updates=[{"f": ["a", "b", "c", "d"]}])
+#             create_branch(parent="branch-1", name="branch-4", updates=[{"f": ["a", "b", "d"]}])
+#
+#         def update_original():
+#             amend_branch(name="branch-1", contents={"f": ["_", "a", "b"]})
+#
+#         def fix_updated(tree: Commit):
+#             update(tree)
+#
+#         def check_tree():
+#             assert_branch(name="branch-1", contents={"f": ["_", "a", "b"]})
+#             assert_branch(name="branch-2", contents={"f": ["_", "a", "b", "c"]})
+#             assert_branch(name="branch-3", contents={"f": ["_", "a", "b", "c", "d"]})
+#             assert_branch(name="branch-4", contents={"f": ["_", "a", "b", "d"]})
+#
+#         self.run_update_test(
+#             ["branch-1", "branch-2", "branch-3", "branch-4"],
+#             build_original,
+#             update_original,
+#             fix_updated,
+#             check_tree
+#         )
+#
+#     def test_update_branch(self):
+#         def build_original():
+#             create_branch(parent="master", name="branch-1", updates=[{"f": ["a", "b"]}])
+#             create_branch(parent="branch-1", name="branch-2", updates=[{"f": ["a", "b", "c"]}])
+#             create_branch(parent="branch-2", name="branch-3", updates=[{"f": ["a", "b", "c", "d"]}])
+#             create_branch(parent="branch-1", name="branch-4", updates=[{"f": ["a", "b", "d"]}])
+#
+#         def update_original():
+#             update_branch(name="branch-1", updates=[
+#                 {"f": ["_", "a", "b"]},
+#                 {"f": ["_", "-", "a", "b"]},
+#             ])
+#
+#         def fix_updated(tree: Commit):
+#             update(tree)
+#
+#         def check_tree():
+#             assert_branch(name="branch-1", contents={"f": ["_", "-", "a", "b"]})
+#             assert_branch(name="branch-2", contents={"f": ["_", "-", "a", "b", "c"]})
+#             assert_branch(name="branch-3", contents={"f": ["_", "-", "a", "b", "c", "d"]})
+#             assert_branch(name="branch-4", contents={"f": ["_", "-", "a", "b", "d"]})
+#
+#         self.run_update_test(
+#             ["branch-1", "branch-2", "branch-3", "branch-4"],
+#             build_original,
+#             update_original,
+#             fix_updated,
+#             check_tree
+#         )
+#
+#     def test_amend_branch_with_conflicts(self):
+#         def build_original():
+#             create_branch(parent="master", name="branch-1", updates=[{"f": ["a", "b"]}])
+#             create_branch(parent="branch-1", name="branch-2", updates=[{"f": ["a", "b", "c"]}])
+#             create_branch(parent="branch-2", name="branch-3", updates=[{"f": ["a", "b", "c", "d"]}])
+#
+#         def update_original():
+#             amend_branch(name="branch-1", contents={"f": ["a", "_", "b"]})
+#
+#         def fix_updated(tree: Commit):
+#             with ConflictResolver({"f": ["a", "_", "b", "c"]}):
+#                 update(tree)
+#
+#         def check_tree():
+#             assert_branch(name="branch-1", contents={"f": ["a", "_", "b"]})
+#             assert_branch(name="branch-2", contents={"f": ["a", "_", "b", "c"]})
+#             assert_branch(name="branch-3", contents={"f": ["a", "_", "b", "c", "d"]})
+#
+#         self.run_update_test(
+#             ["branch-1", "branch-2", "branch-3"],
+#             build_original,
+#             update_original,
+#             fix_updated,
+#             check_tree
+#         )
+#
+#     def test_amend_branch_with_multiple_conflicts(self):
+#         def build_original():
+#             create_branch(parent="master", name="branch-1", updates=[{"f": ["a", "b"]}])
+#             create_branch(parent="branch-1", name="branch-2", updates=[{"f": ["a", "b", "c"]}])
+#             create_branch(parent="branch-2", name="branch-3", updates=[{"f": ["a", "c", "d"]}])
+#
+#         def update_original():
+#             amend_branch(name="branch-1", contents={"f": ["a", "_", "b"]})
+#
+#         def fix_updated(tree: Commit):
+#             with ConflictResolver({"f": ["a", "_", "b", "c"]},
+#                                   {"f": ["a", "_", "c", "d"]}):
+#                 update(tree)
+#
+#         def check_tree():
+#             assert_branch(name="branch-1", contents={"f": ["a", "_", "b"]})
+#             assert_branch(name="branch-2", contents={"f": ["a", "_", "b", "c"]})
+#             assert_branch(name="branch-3", contents={"f": ["a", "_", "c", "d"]})
+#
+#         self.run_update_test(
+#             ["branch-1", "branch-2", "branch-3"],
+#             build_original,
+#             update_original,
+#             fix_updated,
+#             check_tree
+#         )
+#
+#
+# class TestRebase(GitTestCase):
+#     def test_update_with_root(self):
+#         def build_original():
+#             create_branch(parent="master", name="base-branch", updates=[{"f": ["a"]}])
+#             create_branch(parent="base-branch", name="branch-1", updates=[{"f": ["a", "b"]}])
+#             create_branch(parent="branch-1", name="branch-2", updates=[{"f": ["a", "b", "c"]}])
+#             create_branch(parent="base-branch", name="branch-3", updates=[{"g": ["x", "y"]}])
+#
+#         def update_base():
+#             update_branch(name="base-branch", updates=[{"h": ["p", "q"]}])
+#
+#         def check_tree():
+#             assert_branch(name="base-branch", contents={"f": ["a"], "h": ["p", "q"]})
+#             assert_branch(name="branch-1", contents={"f": ["a", "b"], "h": ["p", "q"]})
+#             assert_branch(name="branch-2", contents={"f": ["a", "b", "c"], "h": ["p", "q"]})
+#             assert_branch(name="branch-3", contents={"g": ["x", "y"], "h": ["p", "q"]})
+#
+#         self.run_rebase_test(
+#             ["branch-1", "branch-2", "branch-3"],
+#             "base-branch",
+#             build_original,
+#             update_base,
+#             call_rebase_with_root,
+#             check_tree
+#         )
+#
+#     def test_update_without_root(self):
+#         def build_original():
+#             create_branch(parent="master", name="base-branch", updates=[{"f": ["a"]}])
+#             create_branch(parent="base-branch", name="branch-1", updates=[{"f": ["a", "b"]}])
+#             create_branch(parent="branch-1", name="branch-2", updates=[{"f": ["a", "b", "c"]}])
+#             create_branch(parent="base-branch", name="branch-3", updates=[{"g": ["x", "y"]}])
+#
+#         def update_base():
+#             update_branch(name="master", updates=[{"f": ["a"], "h": ["p", "q"]}])
+#
+#         def check_tree():
+#             assert_branch(name="base-branch", contents={"f": ["a"]})
+#             assert_branch(name="branch-1", contents={"f": ["a", "b"], "h": ["p", "q"]})
+#             assert_branch(name="branch-2", contents={"f": ["a", "b", "c"], "h": ["p", "q"]})
+#             assert_branch(name="branch-3", contents={"g": ["x", "y"], "h": ["p", "q"]})
+#
+#         self.run_rebase_test(
+#             ["branch-1", "branch-2", "branch-3", "base-branch"],
+#             "master",
+#             build_original,
+#             update_base,
+#             call_rebase_without_root,
+#             check_tree
+#         )
 
-        def update_original():
-            amend_branch(name="branch-1", contents={"f": ["_", "a", "b"]})
 
-        def fix_updated(tree: Commit):
-            update(tree)
+class TestPush(unittest.TestCase):
+    @patch("git_tree.git_push")
+    def test_git_push_is_called_with_remote(self, mock_git_push):
+        # given
+        branches = ["branch"]
+        remote = "remote"
+        force = False
 
-        def check_tree():
-            assert_branch(name="branch-1", contents={"f": ["_", "a", "b"]})
-            assert_branch(name="branch-2", contents={"f": ["_", "a", "b", "c"]})
-            assert_branch(name="branch-3", contents={"f": ["_", "a", "b", "c", "d"]})
-            assert_branch(name="branch-4", contents={"f": ["_", "a", "b", "d"]})
+        # when
+        process_push(branches, remote, force=force)
 
-        self.run_update_test(
-            ["branch-1", "branch-2", "branch-3", "branch-4"],
-            build_original,
-            update_original,
-            fix_updated,
-            check_tree
-        )
+        # then
+        assert mock_git_push.assert_called_with(remote, ANY, ANY, ANY, log=ANY)
 
-    def test_update_branch(self):
-        def build_original():
-            create_branch(parent="master", name="branch-1", updates=[{"f": ["a", "b"]}])
-            create_branch(parent="branch-1", name="branch-2", updates=[{"f": ["a", "b", "c"]}])
-            create_branch(parent="branch-2", name="branch-3", updates=[{"f": ["a", "b", "c", "d"]}])
-            create_branch(parent="branch-1", name="branch-4", updates=[{"f": ["a", "b", "d"]}])
+    @patch("git_tree.git_push")
+    def test_git_push_is_called_for_all_branch_names(self, mock_git_push):
+        # given
+        branches = ["branch"]
+        remote = "remote"
+        force = False
 
-        def update_original():
-            update_branch(name="branch-1", updates=[
-                {"f": ["_", "a", "b"]},
-                {"f": ["_", "-", "a", "b"]},
-            ])
+        # when
+        process_push(branches, remote, force=force)
 
-        def fix_updated(tree: Commit):
-            update(tree)
+        # then
+        assert mock_git_push.assert_called_with(ANY, ANY, ANY, ANY, log=ANY)
 
-        def check_tree():
-            assert_branch(name="branch-1", contents={"f": ["_", "-", "a", "b"]})
-            assert_branch(name="branch-2", contents={"f": ["_", "-", "a", "b", "c"]})
-            assert_branch(name="branch-3", contents={"f": ["_", "-", "a", "b", "c", "d"]})
-            assert_branch(name="branch-4", contents={"f": ["_", "-", "a", "b", "d"]})
+    def test_if_force_calls_git_push_with_force(self):
+        pass
 
-        self.run_update_test(
-            ["branch-1", "branch-2", "branch-3", "branch-4"],
-            build_original,
-            update_original,
-            fix_updated,
-            check_tree
-        )
-
-    def test_amend_branch_with_conflicts(self):
-        def build_original():
-            create_branch(parent="master", name="branch-1", updates=[{"f": ["a", "b"]}])
-            create_branch(parent="branch-1", name="branch-2", updates=[{"f": ["a", "b", "c"]}])
-            create_branch(parent="branch-2", name="branch-3", updates=[{"f": ["a", "b", "c", "d"]}])
-
-        def update_original():
-            amend_branch(name="branch-1", contents={"f": ["a", "_", "b"]})
-
-        def fix_updated(tree: Commit):
-            with ConflictResolver({"f": ["a", "_", "b", "c"]}):
-                update(tree)
-
-        def check_tree():
-            assert_branch(name="branch-1", contents={"f": ["a", "_", "b"]})
-            assert_branch(name="branch-2", contents={"f": ["a", "_", "b", "c"]})
-            assert_branch(name="branch-3", contents={"f": ["a", "_", "b", "c", "d"]})
-
-        self.run_update_test(
-            ["branch-1", "branch-2", "branch-3"],
-            build_original,
-            update_original,
-            fix_updated,
-            check_tree
-        )
-
-    def test_amend_branch_with_multiple_conflicts(self):
-        def build_original():
-            create_branch(parent="master", name="branch-1", updates=[{"f": ["a", "b"]}])
-            create_branch(parent="branch-1", name="branch-2", updates=[{"f": ["a", "b", "c"]}])
-            create_branch(parent="branch-2", name="branch-3", updates=[{"f": ["a", "c", "d"]}])
-
-        def update_original():
-            amend_branch(name="branch-1", contents={"f": ["a", "_", "b"]})
-
-        def fix_updated(tree: Commit):
-            with ConflictResolver({"f": ["a", "_", "b", "c"]},
-                                  {"f": ["a", "_", "c", "d"]}):
-                update(tree)
-
-        def check_tree():
-            assert_branch(name="branch-1", contents={"f": ["a", "_", "b"]})
-            assert_branch(name="branch-2", contents={"f": ["a", "_", "b", "c"]})
-            assert_branch(name="branch-3", contents={"f": ["a", "_", "c", "d"]})
-
-        self.run_update_test(
-            ["branch-1", "branch-2", "branch-3"],
-            build_original,
-            update_original,
-            fix_updated,
-            check_tree
-        )
-
-
-class TestRebase(GitTestCase):
-    def test_update_with_root(self):
-        def build_original():
-            create_branch(parent="master", name="base-branch", updates=[{"f": ["a"]}])
-            create_branch(parent="base-branch", name="branch-1", updates=[{"f": ["a", "b"]}])
-            create_branch(parent="branch-1", name="branch-2", updates=[{"f": ["a", "b", "c"]}])
-            create_branch(parent="base-branch", name="branch-3", updates=[{"g": ["x", "y"]}])
-
-        def update_base():
-            update_branch(name="base-branch", updates=[{"h": ["p", "q"]}])
-
-        def check_tree():
-            assert_branch(name="base-branch", contents={"f": ["a"], "h": ["p", "q"]})
-            assert_branch(name="branch-1", contents={"f": ["a", "b"], "h": ["p", "q"]})
-            assert_branch(name="branch-2", contents={"f": ["a", "b", "c"], "h": ["p", "q"]})
-            assert_branch(name="branch-3", contents={"g": ["x", "y"], "h": ["p", "q"]})
-
-        self.run_rebase_test(
-            ["branch-1", "branch-2", "branch-3"],
-            "base-branch",
-            build_original,
-            update_base,
-            call_rebase_with_root,
-            check_tree
-        )
-
-    def test_update_without_root(self):
-        def build_original():
-            create_branch(parent="master", name="base-branch", updates=[{"f": ["a"]}])
-            create_branch(parent="base-branch", name="branch-1", updates=[{"f": ["a", "b"]}])
-            create_branch(parent="branch-1", name="branch-2", updates=[{"f": ["a", "b", "c"]}])
-            create_branch(parent="base-branch", name="branch-3", updates=[{"g": ["x", "y"]}])
-
-        def update_base():
-            update_branch(name="master", updates=[{"f": ["a"], "h": ["p", "q"]}])
-
-        def check_tree():
-            assert_branch(name="base-branch", contents={"f": ["a"]})
-            assert_branch(name="branch-1", contents={"f": ["a", "b"], "h": ["p", "q"]})
-            assert_branch(name="branch-2", contents={"f": ["a", "b", "c"], "h": ["p", "q"]})
-            assert_branch(name="branch-3", contents={"g": ["x", "y"], "h": ["p", "q"]})
-
-        self.run_rebase_test(
-            ["branch-1", "branch-2", "branch-3", "base-branch"],
-            "master",
-            build_original,
-            update_base,
-            call_rebase_without_root,
-            check_tree
-        )
+    def test_if_not_force_calls_git_push_without_force(self):
+        pass
 
 
 @dataclass

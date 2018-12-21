@@ -3,15 +3,21 @@ from dataclasses import dataclass, field
 from subprocess import check_call
 from typing import List, Iterator, Optional
 
-from utils.cmd import output
+from utils.cmd import output, log_cmd
 
 
-def git_checkout(ref: str):
-    check_call(["git", "checkout", ref])
+def git_checkout(ref: str, log: bool = False):
+    cmd = ["git", "checkout", ref]
+    if log:
+        log_cmd(cmd)
+    check_call(cmd)
 
 
-def git_branch(name: str, ref: str):
-    check_call(["git", "checkout", "-b", name, ref])
+def git_branch(name: str, ref: str, log: bool = False):
+    cmd = ["git", "checkout", "-b", name, ref]
+    if log:
+        log_cmd(cmd)
+    check_call(cmd)
 
 
 def git_remote() -> str:
@@ -56,8 +62,24 @@ def git_branch_exists(branch_name: str, remote: bool = False) -> bool:
     return branch_found is not None
 
 
-def git_cherrypick(commitish: str):
-    check_call(["git", "cherry-pick", commitish])
+def git_cherrypick(commitish: str, log: bool = False):
+    cmd = ["git", "cherry-pick", commitish]
+    if log:
+        log_cmd(cmd)
+    check_call(cmd)
+
+
+def git_push(remote: str, local_ref: str, remote_ref: Optional[str], force: bool, log: bool = False):
+    if remote_ref:
+        full_ref = "%s:%s" % (local_ref, remote_ref)
+    else:
+        full_ref = local_ref
+    cmd = ["git", "push", remote, full_ref]
+    if force:
+        cmd.append("--force")
+    if log:
+        log_cmd(cmd)
+    check_call(cmd)
 
 
 @dataclass

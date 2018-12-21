@@ -13,7 +13,8 @@ from typing import Optional, List, Iterator, Callable, Dict, Deque, Iterable
 
 from utils.cmd import output
 from utils.git import git_ref_hash, git_checkout, git_branch, git_delete_branch, git_rename_branch, git_remote, \
-    git_branch_exists, git_common_ancestor, GitLog, git_log_commit, git_log_range, qualify_branch, git_cherrypick
+    git_branch_exists, git_common_ancestor, GitLog, git_log_commit, git_log_range, qualify_branch, git_cherrypick, \
+    git_push
 
 DEFAULT_CONFLICT_RESOLUTION_TIMEOUT_IN_SEC = 24 * 60 * 60
 
@@ -71,12 +72,41 @@ def main():
         type=only_local_branches
     )
 
+    push = subparsers.add_parser(
+        "push",
+        help="Push a local structure onto remote repository",
+        description="Push a local structure to a remote repository"
+    )
+
+    push.add_argument(
+        "--force",
+        help="Force push branches to remote",
+        action='store_true',
+        default=False
+    )
+
+    push.add_argument(
+        "--remote",
+        help="Remote repository to push branches to",
+        default=git_remote()
+    )
+
+    push.add_argument(
+        "branches",
+        metavar='branch-name',
+        help='The name of a local branch that is part of the tree/chain',
+        nargs='+',
+        type=only_local_branches
+    )
+
     args = parser.parse_args()
     subcommand = args.subcommand
     if subcommand == "update":
         process_update(args.branches, args.conflict_resolution_timeout)
     elif subcommand == "rebase":
         process_rebase(args.branches, args.onto, args.wo_root, args.conflict_resolution_timeout)
+    elif subcommand == "push":
+        process_push(args.branches, args.remote, args.force)
 
 
 def only_local_pushed_branches(branch_name: str) -> Optional[str]:
@@ -184,8 +214,7 @@ def update_local_struct(required_tree: Commit,
         print("segment", segment)
         old_ref = segment.end_ref
         if old_ref in old_to_new_name_map:
-            log_cmd("git checkout %s" % old_to_new_name_map[old_ref])
-            git_checkout(old_to_new_name_map[old_ref])
+            git_checkout(old_to_new_name_map[old_ref], log=True)
         else:
             new_ref = temp_ref_name_provider(old_ref)
             if segment.start_ref in old_to_new_name_map:
@@ -193,8 +222,7 @@ def update_local_struct(required_tree: Commit,
             else:
                 start_ref = segment.start_ref
             old_to_new_name_map[old_ref] = new_ref
-            log_cmd("git branch -b %s %s" % (new_ref, start_ref))
-            git_branch(new_ref, start_ref)
+            git_branch(new_ref, start_ref, log=True)
 
         git_cherrypick_range(segment, conflict_resolution_timeout_secs)
 
@@ -240,8 +268,7 @@ def rebase_with_root(branches: List[str],
     for segment in bfs_segments(local_tree):
         old_ref = segment.end_ref
         if old_ref in old_to_new_name_map:
-            log_cmd("git checkout %s" % old_to_new_name_map[old_ref])
-            git_checkout(old_to_new_name_map[old_ref])
+            git_checkout(old_to_new_name_map[old_ref], log=True)
         else:
             new_ref = temp_ref_name_provider(old_ref)
             if segment.start_full_hash == local_tree.full_hash:  # is root
@@ -251,8 +278,7 @@ def rebase_with_root(branches: List[str],
             else:
                 start_ref = segment.start_ref
             old_to_new_name_map[old_ref] = new_ref
-            log_cmd("git branch -b %s %s" % (new_ref, start_ref))
-            git_branch(new_ref, start_ref)
+            git_branch(new_ref, start_ref, log=True)
 
         git_cherrypick_range(segment, conflict_resolution_timeout_secs)
 
@@ -285,8 +311,7 @@ def rebase_without_root(branches: List[str],
         print(segment)
         old_ref = segment.end_ref
         if old_ref in old_to_new_name_map:
-            log_cmd("git checkout %s" % old_to_new_name_map[old_ref])
-            git_checkout(old_to_new_name_map[old_ref])
+            git_checkout(old_to_new_name_map[old_ref], log=True)
         else:
             new_ref = temp_ref_name_provider(old_ref)
             if segment.start_full_hash == local_tree.full_hash:  # is root
@@ -296,8 +321,7 @@ def rebase_without_root(branches: List[str],
             else:
                 start_ref = segment.start_ref
             old_to_new_name_map[old_ref] = new_ref
-            log_cmd("git branch -b %s %s" % (new_ref, start_ref))
-            git_branch(new_ref, start_ref)
+            git_branch(new_ref, start_ref, log=True)
 
         git_cherrypick_range(segment, conflict_resolution_timeout_secs)
 
@@ -309,6 +333,18 @@ def rebase_without_root(branches: List[str],
     if debug_tree:
         print("Updated local tree:")
         print_tree(build_tree(git_common_ancestor(*branches, base_branch), branches + [base_branch]))
+
+
+def process_push(branches: List[str], remote: str, force: bool):
+    done_branches = {}
+
+    def push_branch(ref):
+        if ref not in done_branches:
+            git_push(remote, ref, ref, force, log=True)
+            done_branches[ref] = True
+
+    for branch in branches:
+        push_branch(branch)
 
 
 def verify_tree(root: Commit):
@@ -418,8 +454,7 @@ def git_cherrypick_range(segment: Segment, conflict_resolution_timeout_secs: int
     commits = [log.full_hash for log in git_log_range(segment.start_full_hash, segment.end_ref)]
     for commit in reversed(commits):
         try:
-            log_cmd("cherry-pick %s" % commit)
-            git_cherrypick(commit)
+            git_cherrypick(commit, log=True)
         except CalledProcessError as e:
             if not has_conflicting_files():
                 raise e
@@ -463,10 +498,6 @@ def print_tree(root: Commit, tabs: int = 0):
     print("    " * tabs, root.full_hash, root.subject, root.refs)
     for c in root.children:
         print_tree(c, tabs + 1)
-
-
-def log_cmd(cmd: str):
-    print("$", cmd)
 
 
 if __name__ == '__main__':

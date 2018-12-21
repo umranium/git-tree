@@ -10,3 +10,7 @@ def output(args: List[str], decode_ascii: bool = True, strip: bool = True) -> It
             if strip:
                 line = line.strip()
             yield line
+
+
+def log_cmd(cmd: List[str]):
+    print("$", *cmd)
